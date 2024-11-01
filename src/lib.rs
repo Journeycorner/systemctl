@@ -51,40 +51,41 @@ use bon::Builder;
             self.spawn_child(args)?.wait()
         }
 
-    /// Invokes `systemctl $args` and captures stdout stream
-    fn systemctl_capture<'a, 's: 'a, S: IntoIterator<Item = &'a str>>(
-        &'s self,
-        args: S,
-    ) -> std::io::Result<String> {
-        let mut child = self.spawn_child(args)?;
-        match child.wait()?.code() {
-            Some(0) => {}, // success
-            Some(1) => {}, // success -> Ok(Unit not found)
-            Some(3) => {}, // success -> Ok(unit is inactive and/or dead)
-            Some(4) => {
-                return Err(Error::new(
-                    ErrorKind::PermissionDenied,
-                    "Missing Priviledges or Unit not found",
-                ))
-            },
-            // unknown errorcodes
-            Some(code) => {
-                return Err(Error::new(
-                    // TODO: Maybe a better ErrorKind, none really seem to fit
-                    ErrorKind::Other,
-                    format!("Process exited with code: {code}"),
-                ));
-            },
-            None => {
-                return Err(Error::new(
-                    ErrorKind::Interrupted,
-                    "Process terminated by signal",
-                ))
-            },
-        }
+        /// Invokes `systemctl $args` and captures stdout stream
+        fn systemctl_capture<'a, 's: 'a, S: IntoIterator<Item = &'a str>>(
+            &'s self,
+            args: S,
+        ) -> std::io::Result<String> {
+            let mut child = self.spawn_child(args)?;
+            let output = child.wait_with_output()?;
+            match output.status.code() {
+                Some(0) => {}, // success
+                Some(1) => {}, // success -> Ok(Unit not found)
+                Some(3) => {}, // success -> Ok(unit is inactive and/or dead)
+                Some(4) => {
+                    return Err(Error::new(
+                        ErrorKind::PermissionDenied,
+                        "Missing Priviledges or Unit not found",
+                    ))
+                },
+                // unknown errorcodes
+                Some(code) => {
+                    return Err(Error::new(
+                        // TODO: Maybe a better ErrorKind, none really seem to fit
+                        ErrorKind::Other,
+                        format!("Process exited with code: {code}"),
+                    ));
+                },
+                None => {
+                    return Err(Error::new(
+                        ErrorKind::Interrupted,
+                        "Process terminated by signal",
+                    ))
+                },
+            }
 
-        let mut stdout: Vec<u8> = Vec::new();
-        let size = child.stdout.unwrap().read_to_end(&mut stdout)?;
+        let mut stdout: Vec<u8> = output.stdout;
+        let size = stdout.len();
 
         if size > 0 {
             if let Ok(s) = String::from_utf8(stdout) {
@@ -97,12 +98,12 @@ use bon::Builder;
             }
         }
 
-        // if this is reached all if's above did not work
-        Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "systemctl stdout empty",
-        ))
-    }
+            // if this is reached all if's above did not work
+            Err(Error::new(
+                ErrorKind::UnexpectedEof,
+                "systemctl stdout empty",
+            ))
+        }
 
         /// Reloads all unit files
         pub fn daemon_reload(&self) -> std::io::Result<ExitStatus> {
